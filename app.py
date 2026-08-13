@@ -299,22 +299,25 @@ def livrer(ref):
     for c in commandes:
         if c["ref"] == ref:
             try:
-                envoyer_livraison(c["telephone"], c["nom"], c["niveau"], c["ref"])
-                c["statut"] = "livre"
-            except Exception as e:
-                pass
+               try:
+    envoyer_livraison(c["telephone"], c["nom"], c["niveau"], c["ref"])
+    c["statut"] = "livre"
+except Exception as e:
+    log.error(f"ERREUR LIVRAISON: {e}")
+    import traceback
+    log.error(traceback.format_exc())
             break
     return redirect(url_for("admin"))
 
 @app.route("/admin/renvoyer/<ref>")
 @login_required
-def renvoyer(ref):
-    from whatsapp import envoyer_livraison
-    for c in commandes:
-        if c["ref"] == ref:
-            try:
-                envoyer_livraison(c["telephone"], c["nom"], c["niveau"], c["ref"])
-            except Exception as e:
+try:
+    envoyer_livraison(c["telephone"], c["nom"], c["niveau"], c["ref"])
+    c["statut"] = "livre"
+except Exception as e:
+    log.error(f"ERREUR LIVRAISON: {e}")
+    import traceback
+    log.error(traceback.format_exc())
                 pass
             break
     return redirect(url_for("admin"))
