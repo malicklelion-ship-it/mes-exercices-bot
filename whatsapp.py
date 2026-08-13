@@ -8,8 +8,8 @@ from config import NOMS_NIVEAUX, DRIVE_LINKS
 log = logging.getLogger(__name__)
 
 # ─── Green API — collez vos identifiants ici ────────────────────
-GREEN_INSTANCE = "VOTRE_INSTANCE_ID"   # ex: "1101234567"
-GREEN_TOKEN    = "VOTRE_TOKEN_ICI"     # ex: "abc123..."
+GREEN_INSTANCE = "710722708786"   # ex: "1101234567"
+GREEN_TOKEN    = "219438e83e1a4e929a867f34e27565a560c00bb08f6a4a6089"     # ex: "abc123..."
 # ────────────────────────────────────────────────────────────────
 
 def num(telephone):
