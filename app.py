@@ -1,6 +1,10 @@
 import os
+import logging
 from flask import Flask, request, jsonify, session, redirect, url_for, flash
 from functools import wraps
+
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.secret_key = "mesexercices2025secret"
@@ -61,15 +65,13 @@ h2 { color: #2e7d32; margin-bottom: 20px; font-size: 20px; }
 .pack-btn.selected { border-color: #ff6f00; background: #ffe0b2; }
 .pack-btn .prix { color: #ff6f00; }
 label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px; }
-input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; margin-bottom: 15px; }
+input, select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; margin-bottom: 15px; }
 .recap { background: #e8f5e9; border-radius: 8px; padding: 15px; margin-bottom: 20px; display: none; }
 .recap p { font-size: 14px; margin: 4px 0; }
 .recap strong { color: #2e7d32; font-size: 18px; }
 button[type=submit] { width: 100%; background: #2e7d32; color: white; border: none; padding: 15px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; }
-button[type=submit]:hover { background: #1b5e20; }
 .info-paiement { background: #e3f2fd; border-radius: 8px; padding: 15px; font-size: 13px; line-height: 1.6; }
 .info-paiement strong { color: #1565c0; }
-input[name=niveau] { display: none; }
 </style>
 </head>
 <body>
@@ -104,7 +106,7 @@ input[name=niveau] { display: none; }
       <label>Votre numero WhatsApp</label>
       <input type="tel" name="telephone" placeholder="Ex: 221771234567" required>
       <label>Methode de paiement</label>
-      <select name="paiement" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:14px;margin-bottom:15px;">
+      <select name="paiement">
         <option value="wave">Wave</option>
         <option value="orange_money">Orange Money</option>
       </select>
@@ -177,11 +179,9 @@ a { display: block; background: #25d366; color: white; padding: 12px; border-rad
     <p>Votre reference :</p>
     <strong>""" + ref + """</strong>
   </div>
-  <p>Bonjour <strong>""" + nom + """</strong> !<br>
-  Votre commande pour <strong>""" + NOMS.get(niveau, niveau) + """</strong> est bien enregistree.<br>
-  Vous recevrez votre cahier sur WhatsApp sous <strong>5 minutes</strong>.</p>
+  <p>Votre cahier sera envoye sur WhatsApp sous <strong>5 minutes</strong>.</p>
   <p style="color:#ff6f00;"><strong>Gardez cette reference : """ + ref + """</strong></p>
-  <a href="https://wa.me/221771343499?text=Bonjour%2C+ma+reference+est+""" + ref + """">&#128172; Contacter sur WhatsApp</a>
+  <a href="https://wa.me/221771343499?text=Bonjour+ma+reference+est+""" + ref + """">&#128172; Contacter sur WhatsApp</a>
 </div>
 </body>
 </html>"""
@@ -239,7 +239,7 @@ def admin():
 <td><span style="background:{statut_color};color:white;padding:3px 8px;border-radius:4px;font-size:12px;">{statut_txt}</span></td>
 <td>"""
         if c["statut"] != "livre":
-            rows += f'<a href="/admin/livrer/{c["ref"]}" style="background:#2e7d32;color:white;padding:4px 8px;border-radius:4px;font-size:12px;text-decoration:none;">Livrer</a> '
+            rows += f'<a href="/admin/livrer/{c["ref"]}" style="background:#2e7d32;color:white;padding:4px 8px;border-radius:4px;font-size:12px;text-decoration:none;margin-right:4px;">Livrer</a>'
         rows += f'<a href="/admin/renvoyer/{c["ref"]}" style="background:#1565c0;color:white;padding:4px 8px;border-radius:4px;font-size:12px;text-decoration:none;">Renvoyer</a>'
         rows += "</td></tr>"
     total = len(commandes)
@@ -267,7 +267,6 @@ table { width: 100%; border-collapse: collapse; background: white; border-radius
 th { background: #2e7d32; color: white; padding: 10px; text-align: left; }
 td { padding: 10px; border-bottom: 1px solid #f0f0f0; }
 tr:last-child td { border-bottom: none; }
-tr:hover td { background: #f9f9f9; }
 .empty { text-align: center; padding: 40px; color: #999; }
 </style>
 </head>
@@ -284,7 +283,7 @@ tr:hover td { background: #f9f9f9; }
 <div class="container">
   <a href="/admin/nouvelle" class="btn-new">+ Nouvelle commande manuelle</a>
   """ + (f"""<table>
-<thead><tr><th>Ref</th><th>Nom</th><th>Telephone</th><th>Niveau</th><th>Prix</th><th>Paiement</th><th>Statut</th><th>Actions</th></tr></thead>
+<thead><tr><th>Ref</th><th>Nom</th><th>Tel</th><th>Niveau</th><th>Prix</th><th>Paiement</th><th>Statut</th><th>Actions</th></tr></thead>
 <tbody>{rows}</tbody>
 </table>""" if commandes else '<div class="empty">Aucune commande pour le moment</div>') + """
 </div>
@@ -295,30 +294,33 @@ tr:hover td { background: #f9f9f9; }
 @app.route("/admin/livrer/<ref>")
 @login_required
 def livrer(ref):
-    from whatsapp import envoyer_livraison
     for c in commandes:
         if c["ref"] == ref:
             try:
-               try:
-    envoyer_livraison(c["telephone"], c["nom"], c["niveau"], c["ref"])
-    c["statut"] = "livre"
-except Exception as e:
-    log.error(f"ERREUR LIVRAISON: {e}")
-    import traceback
-    log.error(traceback.format_exc())
+                from whatsapp import envoyer_livraison
+                envoyer_livraison(c["telephone"], c["nom"], c["niveau"], c["ref"])
+                c["statut"] = "livre"
+                log.info(f"Livraison OK: {ref} -> {c['telephone']}")
+            except Exception as e:
+                log.error(f"ERREUR LIVRAISON {ref}: {e}")
+                import traceback
+                log.error(traceback.format_exc())
             break
     return redirect(url_for("admin"))
 
 @app.route("/admin/renvoyer/<ref>")
 @login_required
-try:
-    envoyer_livraison(c["telephone"], c["nom"], c["niveau"], c["ref"])
-    c["statut"] = "livre"
-except Exception as e:
-    log.error(f"ERREUR LIVRAISON: {e}")
-    import traceback
-    log.error(traceback.format_exc())
-                pass
+def renvoyer(ref):
+    for c in commandes:
+        if c["ref"] == ref:
+            try:
+                from whatsapp import envoyer_livraison
+                envoyer_livraison(c["telephone"], c["nom"], c["niveau"], c["ref"])
+                log.info(f"Renvoi OK: {ref} -> {c['telephone']}")
+            except Exception as e:
+                log.error(f"ERREUR RENVOI {ref}: {e}")
+                import traceback
+                log.error(traceback.format_exc())
             break
     return redirect(url_for("admin"))
 
@@ -332,14 +334,13 @@ def nouvelle():
         paiement = request.form.get("paiement", "wave")
         import random, string
         ref = "ME" + "".join(random.choices(string.digits, k=6))
-        commande = {
+        commandes.append({
             "ref": ref, "niveau": niveau, "nom_niveau": NOMS.get(niveau, niveau),
             "nom": nom, "telephone": telephone, "paiement": paiement,
             "prix": PRIX.get(niveau, 0), "statut": "en_attente"
-        }
-        commandes.append(commande)
+        })
         return redirect(url_for("admin"))
-    options = "".join([f'<option value="{k}">{v} - {p:,} F</option>' for k, (v, p) in zip(NOMS.keys(), [(v, PRIX[k]) for k, v in NOMS.items()])])
+    options = "".join([f'<option value="{k}">{v} - {PRIX[k]:,} F</option>' for k, v in NOMS.items()])
     html = """<!DOCTYPE html>
 <html lang="fr">
 <head>
