@@ -22,15 +22,15 @@ NOMS_NIVEAUX = {
 }
 
 DRIVE_LINKS = {
-    "maternelle": "https://drive.google.com/file/d/1K0W1OhjWi9przzz4Q7sGkUbRtnQMLJOk/view?usp=sharing",
-    "ci":         "https://drive.google.com/file/d/1URr_sYraPxX_EDX8MVYond4X4qA_NUd-/view?usp=drive_link",
-    "cp":         "https://drive.google.com/file/d/1_BgaDuurE3zRW4E9bgMfyu7KpPnGZsRB/view?usp=sharing",
-    "ce1":        "https://drive.google.com/file/d/1_LIt16yOn9oRPy32CGxynbg71w2hWFgi/view?usp=sharing",
-    "ce2":        "https://drive.google.com/file/d/1v0mYvk-iVU0lFBBAXhlW1S0TjYwiVo6f/view?usp=drive_link",
-    "cm1":        "https://drive.google.com/file/d/100MbZfQ23dkX-JRWYyWbz1_76g0UBkmw/view?usp=drive_link",
-    "cm2":        "https://drive.google.com/file/d/1zG8XeuaT2KX87SKxIw9B8TY31iBFfJSb/view?usp=drive_link",
-    "cem1":       "https://drive.google.com/file/d/1ERJBgxta-UMAZXYX9YLQ0mHiDRbd0m3W/view?usp=drive_link",
-    "cem2":       "https://drive.google.com/file/d/1QndP0yRfbpfQgvYkj9eP3qs9cZrgu5IM/view?usp=sharing",
+    "maternelle": "https://drive.google.com/file/d/1kqocCbOlYSFfSJotNPSK3dp36EcCavuW/view?usp=drive_link",
+    "ci":         "https://drive.google.com/file/d/1b_GLMYrqK5GN60szlarfKOf5Lh9Erx3d/view?usp=drive_link",
+    "cp":         "https://drive.google.com/file/d/1Ie39rU54ahU9QVtPBChhBUmRgBVRrIL3/view?usp=drive_link",
+    "ce1":        "https://drive.google.com/file/d/1H0SHtPG2IDS96omT9iPNj3fOnhexPAFf/view?usp=drive_link",
+    "ce2":        "https://drive.google.com/file/d/1YkCeMJSLKQgP24Rk2bCtq-YNhNZHd4YT/view?usp=drive_link",
+    "cm1":        "https://drive.google.com/file/d/1Mt0dgDr_zq0KNg7eeRKujBWsC01mWCq6/view?usp=drive_link",
+    "cm2":        "https://drive.google.com/file/d/1rBHg-39IYHSyaPE8DrmZuAWeoI4eRnzg/view?usp=drive_link",
+    "cem1":       "https://drive.google.com/file/d/1QDU8lRaNR7qXTv8LhzRak4Oy-Vxs41KK/view?usp=drive_link",
+    "cem2":       "https://drive.google.com/file/d/1jdyGLh6NiqSH9HgBEcEiSoWuP-nimCme/view?usp=drive_link",
     "pack":       "Voir les 9 liens ci-dessus",
 }
 
