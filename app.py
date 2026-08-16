@@ -1,4 +1,4 @@
-import os, logging, random, string, re, threading, time, requests
+import os, logging, random, string, re, threading, time, requests, json
 from flask import Flask, request, jsonify, session, redirect, url_for, Response
 from functools import wraps
 
@@ -9,11 +9,13 @@ app = Flask(__name__)
 app.secret_key = "mesexercices2025secret"
 
 ADMIN_PASSWORD = "mesexercices2025"
-WAVE_LINK      = "https://pay.wave.com/m/M_sn_KPX6hNLZUljQ/c/sn/"
+WAVE_BASE      = "https://pay.wave.com/m/M_sn_KPX6hNLZUljQ/c/sn/"
 WHATSAPP_NUM   = "221771343499"
+SITE_URL       = "https://mes-exercices.com"
 GREEN_INSTANCE = "710722708786"
 GREEN_TOKEN    = "219438e83e1a4e929a867f34e27565a560c00bb08f6a4a6089"
 GREEN_BASE     = f"https://7107.api.greenapi.com/waInstance{GREEN_INSTANCE}"
+ORDERS_FILE    = "commandes.json"
 
 PRIX = {"maternelle":1000,"ci":1000,"cp":1000,"ce1":1000,"ce2":1000,
         "cm1":1000,"cm2":1000,"cem1":1200,"cem2":1500,"pack":6000}
@@ -22,8 +24,30 @@ NOMS = {"maternelle":"Maternelle","ci":"CI - Cours d'Initiation",
         "cm1":"CM1","cm2":"CM2","cem1":"CEM1 (6eme)",
         "cem2":"CEM2 (BFEM)","pack":"Pack Complet (9 niveaux)"}
 
-commandes = []
 messages_traites = set()
+
+# ============================================================
+# PERSISTANCE JSON
+# ============================================================
+def charger_commandes():
+    try:
+        if os.path.exists(ORDERS_FILE):
+            with open(ORDERS_FILE,"r") as f:
+                data = json.load(f)
+                log.info(f"✅ {len(data)} commandes chargees")
+                return data
+    except Exception as e:
+        log.error(f"Erreur chargement: {e}")
+    return []
+
+def sauvegarder():
+    try:
+        with open(ORDERS_FILE,"w") as f:
+            json.dump(commandes, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        log.error(f"Erreur sauvegarde: {e}")
+
+commandes = charger_commandes()
 
 def gen_ref():
     return "ME" + "".join(random.choices(string.digits, k=6))
@@ -37,105 +61,100 @@ def login_required(f):
     return decorated
 
 # ============================================================
-# WHATSAPP
+# LIVRAISON
 # ============================================================
-def wa_send(telephone, texte):
-    numero = telephone.strip().replace("+","").replace(" ","")
-    if not numero.endswith("@c.us"):
-        numero += "@c.us"
-    try:
-        r = requests.post(
-            f"{GREEN_BASE}/sendMessage/{GREEN_TOKEN}",
-            json={"chatId": numero, "message": texte},
-            timeout=15
-        )
-        return r.status_code == 200
-    except Exception as e:
-        log.error(f"wa_send erreur: {e}")
-        return False
-
 def livrer_commande(c):
     try:
         from whatsapp import envoyer_livraison
         envoyer_livraison(c["telephone"], c["nom"], c["niveau"], c["ref"])
         c["statut"] = "livre"
-        log.info(f"✅ LIVRE AUTO: {c['ref']} → {c['telephone']}")
+        sauvegarder()
+        log.info(f"✅ LIVRE: {c['ref']} → {c['telephone']}")
         return True
     except Exception as e:
-        log.error(f"Erreur livraison {c['ref']}: {e}")
+        log.error(f"❌ Erreur livraison {c['ref']}: {e}")
         import traceback; log.error(traceback.format_exc())
         return False
 
-def traiter_texte(texte, expediteur):
-    refs = re.findall(r'ME\d{6}', texte.upper())
-    if not refs:
-        return
-    for ref in refs:
-        for c in commandes:
-            if c["ref"] == ref:
-                livrer_commande(c)
-                return
+def trouver_et_livrer(ref):
+    """Trouve une commande par ref et la livre"""
+    for c in commandes:
+        if c["ref"] == ref.upper():
+            if c["statut"] != "livre":
+                return livrer_commande(c)
+            else:
+                # Deja livre — renvoyer quand meme
+                try:
+                    from whatsapp import envoyer_livraison
+                    envoyer_livraison(c["telephone"],c["nom"],c["niveau"],c["ref"])
+                    return True
+                except:
+                    return False
+    return False
 
 # ============================================================
-# POLLING — CORRIGE
+# POLLING WHATSAPP
 # ============================================================
 def polling_whatsapp():
-    log.info("🔄 Polling demarre")
+    log.info("🔄 Polling WhatsApp demarre")
     while True:
         try:
             r = requests.get(
                 f"{GREEN_BASE}/receiveNotification/{GREEN_TOKEN}",
                 timeout=15
             )
+            if r.status_code != 200:
+                time.sleep(5); continue
 
-            # CORRECTION : verifier que la reponse n'est pas vide
-            if r.status_code != 200 or not r.text or r.text.strip() == "null":
-                time.sleep(5)
-                continue
+            text = r.text.strip()
+            if not text or text in ("null","{}",""):
+                time.sleep(3); continue
 
-            # Essayer de parser le JSON
             try:
                 data = r.json()
-            except Exception:
-                time.sleep(5)
-                continue
+            except:
+                time.sleep(3); continue
 
             if not data:
-                time.sleep(5)
-                continue
+                time.sleep(3); continue
 
             receipt_id = data.get("receiptId")
-            body       = data.get("body", {})
-            type_wh    = body.get("typeWebhook", "")
+            body = data.get("body", {})
+            type_wh = body.get("typeWebhook","")
 
-            # Supprimer la notification pour ne pas la retraiter
             if receipt_id:
                 try:
                     requests.delete(
                         f"{GREEN_BASE}/deleteNotification/{GREEN_TOKEN}/{receipt_id}",
                         timeout=5
                     )
-                except:
-                    pass
+                except: pass
 
             if type_wh != "incomingMessageReceived":
-                continue
+                time.sleep(2); continue
 
             msg_id = body.get("idMessage","")
-            if msg_id in messages_traites:
-                continue
-            messages_traites.add(msg_id)
+            if msg_id and msg_id in messages_traites:
+                time.sleep(2); continue
+            if msg_id:
+                messages_traites.add(msg_id)
 
-            msg_data   = body.get("messageData", {})
-            texte      = msg_data.get("textMessageData", {}).get("textMessage", "")
-            expediteur = body.get("senderData", {}).get("sender","").replace("@c.us","")
+            msg_data = body.get("messageData",{})
+            texte = msg_data.get("textMessageData",{}).get("textMessage","")
 
             if not texte:
-                continue
+                time.sleep(2); continue
 
-            log.info(f"📩 Message de {expediteur}: {texte[:60]}")
-            traiter_texte(texte, expediteur)
+            log.info(f"📩 Message WhatsApp: '{texte[:60]}'")
 
+            # Chercher references MExxxxxx
+            refs = re.findall(r'ME\d{6}', texte.upper())
+            for ref in refs:
+                log.info(f"🔍 Reference trouvee: {ref}")
+                trouver_et_livrer(ref)
+
+        except requests.exceptions.Timeout:
+            time.sleep(10)
         except Exception as e:
             log.error(f"Erreur polling: {e}")
             time.sleep(15)
@@ -158,14 +177,88 @@ def health():
         "livrees":sum(1 for c in commandes if c["statut"]=="livre")
     })
 
-@app.route("/test/<ref>")
-def test_livraison(ref):
-    """Route de test — livraison manuelle par URL"""
+@app.route("/confirmer/<ref>")
+def confirmer(ref):
+    """
+    Page de confirmation directe — le client arrive ici apres paiement
+    Le cahier est livre immediatement sans passer par WhatsApp
+    """
+    ref = ref.upper()
+    log.info(f"Confirmation directe recue pour: {ref}")
+
     for c in commandes:
         if c["ref"] == ref:
-            ok = livrer_commande(c)
-            return f"{'✅ OK' if ok else '❌ Erreur'} — {ref} → {c['telephone']}"
-    return f"❌ Ref {ref} non trouvée. Commandes: {[c['ref'] for c in commandes]}"
+            # Livrer immediatement
+            ok = trouver_et_livrer(ref)
+            if ok:
+                html = f"""<!DOCTYPE html>
+<html lang="fr"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Livraison confirmee - MES EXERCICES</title>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+background:#F0FFF4;display:flex;align-items:center;justify-content:center;
+min-height:100vh;padding:20px}}
+.card{{background:#fff;border-radius:16px;padding:36px 28px;max-width:420px;
+width:100%;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.1)}}
+.check{{font-size:72px;margin-bottom:16px}}
+h1{{color:#1A7A4A;font-size:22px;font-weight:800;margin-bottom:10px}}
+p{{color:#555;font-size:14px;line-height:1.6;margin-bottom:8px}}
+.ref{{background:#E8F5E9;border-radius:8px;padding:12px;margin:16px 0;
+font-size:13px;color:#1A7A4A;font-weight:600}}
+.btn{{display:block;background:#25D366;color:#fff;padding:14px;
+border-radius:10px;text-decoration:none;font-size:15px;
+font-weight:700;margin-top:16px}}
+</style></head>
+<body><div class="card">
+  <div class="check">✅</div>
+  <h1>Cahier envoyé sur WhatsApp !</h1>
+  <p>Bonjour <strong>{c['nom']}</strong> !</p>
+  <div class="ref">
+    Commande : <strong>{ref}</strong><br>
+    Niveau : {c['nom_niveau']}<br>
+    Statut : ✅ Livré
+  </div>
+  <p>Votre cahier PDF a été envoyé sur WhatsApp au<br>
+  <strong>{c['telephone']}</strong></p>
+  <p style="margin-top:12px;font-size:12px;color:#888">
+  Vous ne voyez pas le message ? Contactez-nous.</p>
+  <a href="https://wa.me/{WHATSAPP_NUM}?text=Bonjour+j%27ai+commande+ref+{ref}" 
+     class="btn">💬 Contacter le support</a>
+</div></body></html>"""
+                return html
+            else:
+                # Erreur livraison — rediriger vers WhatsApp
+                return redirect(
+                    f"https://wa.me/{WHATSAPP_NUM}?text=Bonjour+j%27ai+paye+ma+commande+ref+{ref}"
+                )
+
+    # Reference non trouvee
+    html = f"""<!DOCTYPE html>
+<html lang="fr"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reference introuvable</title>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{font-family:Arial,sans-serif;background:#FFF3F3;display:flex;
+align-items:center;justify-content:center;min-height:100vh;padding:20px}}
+.card{{background:#fff;border-radius:16px;padding:32px;max-width:400px;
+width:100%;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,.08)}}
+h1{{color:#c62828;font-size:18px;margin-bottom:12px}}
+p{{color:#555;font-size:14px;margin-bottom:16px;line-height:1.6}}
+.btn{{display:block;background:#25D366;color:#fff;padding:14px;
+border-radius:10px;text-decoration:none;font-size:15px;font-weight:700}}
+</style></head>
+<body><div class="card">
+  <div style="font-size:60px;margin-bottom:12px">⚠️</div>
+  <h1>Reference introuvable</h1>
+  <p>La reference <strong>{ref}</strong> n'a pas ete trouvee.<br>
+  Contactez-nous sur WhatsApp avec votre reference.</p>
+  <a href="https://wa.me/{WHATSAPP_NUM}?text=Bonjour+reference+{ref}" 
+     class="btn">💬 Contacter sur WhatsApp</a>
+</div></body></html>"""
+    return html
 
 @app.route("/")
 def index():
@@ -174,17 +267,29 @@ def index():
 @app.route("/commander", methods=["POST"])
 def commander():
     niveau    = request.form.get("niveau")
-    nom       = request.form.get("nom")
-    telephone = request.form.get("telephone")
+    nom       = request.form.get("nom","").strip()
+    telephone = request.form.get("telephone","").strip()
     if not niveau or not nom or not telephone:
         return redirect("/")
+
     ref  = gen_ref()
     prix = PRIX.get(niveau, 1000)
+
     commandes.append({
         "ref":ref,"niveau":niveau,"nom_niveau":NOMS.get(niveau,niveau),
         "nom":nom,"telephone":telephone,"prix":prix,"statut":"en_attente"
     })
+    sauvegarder()
     log.info(f"📝 Commande: {ref} - {nom} - {niveau} - {prix}F")
+
+    # Lien Wave avec montant pre-rempli et verrouille
+    wave_url = f"{WAVE_BASE}?amount={prix}"
+    # URL de confirmation directe
+    confirm_url = f"{SITE_URL}/confirmer/{ref}"
+    # Message WhatsApp pre-rempli
+    wa_msg = f"Bonjour+j%27ai+paye+ma+commande+ref+{ref}+montant+{prix}+FCFA"
+    wa_url = f"https://wa.me/{WHATSAPP_NUM}?text={wa_msg}"
+
     html = f"""<!DOCTYPE html>
 <html lang="fr"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -192,65 +297,166 @@ def commander():
 <style>
 :root{{--bleu:#1B3A6B;--jaune:#F5C518;--vert:#1A7A4A}}
 *{{margin:0;padding:0;box-sizing:border-box}}
-body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#F0F4F8}}
-nav{{background:var(--bleu);padding:0 20px;height:52px;display:flex;align-items:center}}
+body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+background:#F0F4F8;color:#1A1A18}}
+nav{{background:var(--bleu);padding:0 20px;height:52px;
+display:flex;align-items:center;justify-content:space-between}}
 .logo{{color:var(--jaune);font-size:14px;font-weight:800}}
-.wrap{{max-width:480px;margin:24px auto;padding:0 14px}}
-.card{{background:#fff;border-radius:14px;padding:24px;box-shadow:0 2px 12px rgba(0,0,0,.08);margin-bottom:12px}}
-.ref{{background:#EFF6FF;border:2px solid var(--bleu);border-radius:10px;padding:14px;text-align:center;margin-bottom:16px}}
-.ref p{{font-size:12px;color:#666;margin-bottom:4px}}
-.ref strong{{font-size:32px;color:var(--bleu);letter-spacing:4px;font-weight:900;display:block}}
-.mt{{background:#FFFBEA;border:2px solid var(--jaune);border-radius:10px;padding:12px;text-align:center;margin-bottom:16px}}
-.mt p{{font-size:12px;color:#888}}
-.mt strong{{font-size:26px;color:#B8860B;font-weight:800;display:block;margin-top:3px}}
-.auto{{background:#E8F5E9;border:1px solid #66BB6A;border-radius:10px;padding:12px;text-align:center;font-size:13px;color:#1B5E20;margin-bottom:16px;line-height:1.6}}
-h3{{font-size:14px;font-weight:700;margin-bottom:12px}}
-.bw{{display:flex;align-items:center;justify-content:center;gap:8px;background:#1565C0;color:#fff;padding:14px;border-radius:10px;text-decoration:none;font-size:14px;font-weight:700;margin-bottom:8px}}
-.bo{{display:flex;align-items:center;justify-content:center;gap:8px;background:#E65100;color:#fff;padding:14px;border-radius:10px;border:none;cursor:pointer;font-size:14px;font-weight:700;width:100%;margin-bottom:8px}}
-.om{{background:#FFF3E0;border-radius:8px;padding:12px;font-size:13px;line-height:1.8;display:none;margin-bottom:8px}}
-.om code{{background:#FFE0B2;padding:3px 8px;border-radius:5px;font-weight:700;display:inline-block}}
-.bwa{{display:flex;align-items:center;justify-content:center;gap:8px;background:#25D366;color:#fff;padding:15px;border-radius:10px;text-decoration:none;font-size:15px;font-weight:800}}
+.wrap{{max-width:460px;margin:24px auto;padding:0 14px}}
+.card{{background:#fff;border-radius:14px;padding:24px;
+box-shadow:0 2px 12px rgba(0,0,0,.08);margin-bottom:12px}}
+
+/* Reference */
+.ref-box{{background:#EFF6FF;border:2px solid var(--bleu);
+border-radius:10px;padding:16px;text-align:center;margin-bottom:16px}}
+.ref-box .label{{font-size:12px;color:#666;margin-bottom:4px}}
+.ref-box .code{{font-size:34px;color:var(--bleu);letter-spacing:5px;
+font-weight:900;display:block}}
+
+/* Montant */
+.montant-box{{background:#FFFBEA;border:2px solid var(--jaune);
+border-radius:10px;padding:14px;text-align:center;margin-bottom:20px}}
+.montant-box .niveau-nom{{font-size:13px;color:#888;margin-bottom:4px}}
+.montant-box .montant{{font-size:30px;color:#B8860B;font-weight:900}}
+
+/* Etapes */
+.etape{{margin-bottom:20px}}
+.etape-titre{{font-size:14px;font-weight:700;color:#1A1A18;
+margin-bottom:10px;display:flex;align-items:center;gap:8px}}
+.etape-num{{width:26px;height:26px;border-radius:50%;
+background:var(--bleu);color:#fff;font-size:12px;font-weight:800;
+display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}}
+
+/* Boutons */
+.btn-wave{{display:flex;align-items:center;justify-content:center;
+gap:10px;background:#1565C0;color:#fff;padding:16px;border-radius:10px;
+text-decoration:none;font-size:15px;font-weight:700;margin-bottom:8px;
+transition:opacity .2s}}
+.btn-wave:hover{{opacity:.9}}
+.btn-om{{display:flex;align-items:center;justify-content:center;
+gap:10px;background:#E65100;color:#fff;padding:16px;border-radius:10px;
+border:none;cursor:pointer;font-size:15px;font-weight:700;width:100%;
+margin-bottom:8px}}
+.om-box{{background:#FFF3E0;border-radius:10px;padding:14px;
+font-size:13px;line-height:1.9;display:none;margin-bottom:8px}}
+.om-box code{{background:#FFE0B2;padding:3px 9px;border-radius:5px;
+font-weight:700;display:inline-block;font-size:14px}}
+
+/* Confirmation directe */
+.confirm-box{{background:#E8F5E9;border:2px solid #4CAF50;
+border-radius:12px;padding:16px;margin-bottom:8px}}
+.confirm-box p{{font-size:13px;color:#1B5E20;margin-bottom:10px;line-height:1.6}}
+.btn-confirm{{display:flex;align-items:center;justify-content:center;
+gap:10px;background:#1A7A4A;color:#fff;padding:16px;border-radius:10px;
+text-decoration:none;font-size:15px;font-weight:800}}
+.btn-confirm:hover{{background:#145c38}}
+
+/* Séparateur */
+.ou{{text-align:center;color:#aaa;font-size:12px;margin:8px 0;
+display:flex;align-items:center;gap:8px}}
+.ou::before,.ou::after{{content:'';flex:1;height:1px;background:#e0e0e0}}
+
+/* WhatsApp backup */
+.btn-wa{{display:flex;align-items:center;justify-content:center;
+gap:10px;background:#25D366;color:#fff;padding:14px;border-radius:10px;
+text-decoration:none;font-size:14px;font-weight:700}}
 .note{{font-size:11px;color:#aaa;text-align:center;margin-top:8px;line-height:1.6}}
+
+/* Badge securite */
+.secure{{background:#F3F4F6;border-radius:8px;padding:10px;
+text-align:center;font-size:11px;color:#666;margin-top:8px}}
 </style></head>
 <body>
-<nav><div class="logo">📚 MES EXERCICES</div></nav>
+<nav>
+  <div class="logo">📚 MES EXERCICES</div>
+  <a href="/" style="color:rgba(255,255,255,.6);font-size:12px;text-decoration:none">← Retour</a>
+</nav>
 <div class="wrap">
 <div class="card">
-  <div class="ref">
-    <p>Votre reference</p>
-    <strong>{ref}</strong>
+
+  <div class="ref-box">
+    <div class="label">Votre reference de commande</div>
+    <span class="code">{ref}</span>
   </div>
-  <div class="mt">
-    <p>{NOMS.get(niveau,niveau)}</p>
-    <strong>{prix:,} FCFA</strong>
+
+  <div class="montant-box">
+    <div class="niveau-nom">{NOMS.get(niveau,niveau)}</div>
+    <div class="montant">{prix:,} FCFA</div>
   </div>
-  <div class="auto">
-    ⚡ <strong>Livraison automatique !</strong><br>
-    Apres paiement → cliquez WhatsApp ci-dessous<br>
-    → Cahier reçu en moins de 2 minutes
+
+  <!-- ETAPE 1 : PAIEMENT -->
+  <div class="etape">
+    <div class="etape-titre">
+      <span class="etape-num">1</span>
+      Payez maintenant
+    </div>
+
+    <!-- Wave avec montant pre-rempli -->
+    <a href="{wave_url}" class="btn-wave" target="_blank"
+       onclick="sessionStorage.setItem('paid','yes')">
+      💙 Payer {prix:,} FCFA avec Wave
+    </a>
+
+    <!-- Orange Money -->
+    <button class="btn-om"
+      onclick="var o=document.getElementById('om');
+               o.style.display=o.style.display=='block'?'none':'block'">
+      🟠 Payer avec Orange Money
+    </button>
+    <div class="om-box" id="om">
+      <strong>Composez sur votre telephone :</strong><br>
+      <code>*144*2*{WHATSAPP_NUM}*{prix}#</code><br><br>
+      <strong>Ou dans l'app Orange Money :</strong><br>
+      Transfert → <code>77 134 34 99</code> → <code>{prix} FCFA</code><br>
+      Validez avec votre code PIN
+    </div>
   </div>
-  <h3>1️⃣ Payez maintenant</h3>
-  <a href="{WAVE_LINK}" class="bw" target="_blank">💙 Payer avec Wave</a>
-  <button class="bo" onclick="var o=document.getElementById('om');o.style.display=o.style.display=='block'?'none':'block'">
-    🟠 Payer avec Orange Money
-  </button>
-  <div class="om" id="om">
-    <strong>Par telephone :</strong><br>
-    <code>*144*2*{WHATSAPP_NUM}*{prix}#</code><br><br>
-    <strong>Par app Orange Money :</strong><br>
-    Transfert → <code>77 134 34 99</code> → <code>{prix} FCFA</code>
+
+  <!-- ETAPE 2 : CONFIRMATION -->
+  <div class="etape">
+    <div class="etape-titre">
+      <span class="etape-num">2</span>
+      Confirmez et recevez votre cahier
+    </div>
+
+    <!-- OPTION A : Confirmation directe (recommandee) -->
+    <div class="confirm-box">
+      <p>⚡ <strong>Option recommandee</strong> — Cliquez apres avoir paye :<br>
+      Votre cahier est envoye <strong>instantanement</strong> sur WhatsApp !</p>
+      <a href="{confirm_url}" class="btn-confirm">
+        ✅ J'ai paye — Envoyer mon cahier maintenant !
+      </a>
+    </div>
+
+    <div class="ou">ou</div>
+
+    <!-- OPTION B : Via WhatsApp -->
+    <a href="{wa_url}" class="btn-wa" target="_blank">
+      💬 Confirmer via WhatsApp
+    </a>
+    <p class="note">
+      Message pre-rempli avec votre reference <strong>{ref}</strong><br>
+      Livraison automatique en moins de 2 minutes
+    </p>
   </div>
-  <h3>2️⃣ Confirmez et recevez votre cahier</h3>
-  <a href="https://wa.me/{WHATSAPP_NUM}?text=Bonjour+j%27ai+paye+ma+commande+ref+{ref}+montant+{prix}+FCFA"
-     class="bwa" target="_blank">
-    💬 Envoyer confirmation WhatsApp
-  </a>
-  <p class="note">
-    Message pre-rempli avec votre reference <strong>{ref}</strong><br>
-    Envoyez-le apres avoir paye — cahier arrive automatiquement !
-  </p>
+
+  <div class="secure">
+    🔒 Paiement securise · Vos donnees sont protegees<br>
+    Support : +221 77 134 34 99
+  </div>
+
 </div>
 </div>
+
+<script>
+// Si le client revient apres paiement Wave, proposer la confirmation
+window.addEventListener('focus', function() {{
+  if (sessionStorage.getItem('paid') === 'yes') {{
+    document.querySelector('.confirm-box').style.border = '3px solid #1A7A4A';
+    document.querySelector('.btn-confirm').style.animation = 'pulse 1s infinite';
+  }}
+}});
+</script>
 </body></html>"""
     return html
 
@@ -263,15 +469,21 @@ def login():
             return redirect(url_for("admin"))
         error="Mot de passe incorrect"
     return Response(f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Admin</title>
-<style>body{{font-family:Arial,sans-serif;background:#1a1a2e;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}}
-.c{{background:#fff;border-radius:12px;padding:28px;width:300px}}h2{{text-align:center;color:#1B3A6B;margin-bottom:18px}}
-input{{width:100%;padding:10px;border:1px solid #ddd;border-radius:6px;margin-bottom:12px;font-size:14px;box-sizing:border-box}}
-button{{width:100%;background:#1B3A6B;color:#fff;border:none;padding:12px;border-radius:6px;font-size:15px;cursor:pointer}}
+<style>body{{font-family:Arial,sans-serif;background:#1a1a2e;display:flex;justify-content:center;
+align-items:center;min-height:100vh;margin:0}}
+.c{{background:#fff;border-radius:12px;padding:28px;width:300px}}
+h2{{text-align:center;color:#1B3A6B;margin-bottom:18px}}
+input{{width:100%;padding:10px;border:1px solid #ddd;border-radius:6px;
+margin-bottom:12px;font-size:14px;box-sizing:border-box}}
+button{{width:100%;background:#1B3A6B;color:#fff;border:none;padding:12px;
+border-radius:6px;font-size:15px;cursor:pointer}}
 .e{{color:red;font-size:12px;margin-bottom:8px}}</style></head>
-<body><div class="c"><h2>🔒 Admin</h2>
+<body><div class="c"><h2>🔒 Admin MES EXERCICES</h2>
 {'<p class="e">'+error+'</p>' if error else ''}
-<form method="POST"><input type="password" name="password" placeholder="Mot de passe" required autofocus>
-<button>Se connecter</button></form></div></body></html>""",mimetype="text/html")
+<form method="POST">
+<input type="password" name="password" placeholder="Mot de passe" required autofocus>
+<button>Se connecter</button>
+</form></div></body></html>""",mimetype="text/html")
 
 @app.route("/admin")
 @login_required
@@ -279,58 +491,83 @@ def admin():
     rows=""
     for c in reversed(commandes):
         sc="#4caf50" if c["statut"]=="livre" else "#ff9800"
-        st="✅ Livre" if c["statut"]=="livre" else "⏳ Attente"
+        st="✅ Livre" if c["statut"]=="livre" else "⏳ En attente"
         rows+=f"""<tr>
-<td><strong>{c['ref']}</strong></td><td>{c['nom']}</td><td>{c['telephone']}</td>
-<td>{c['nom_niveau']}</td><td>{c['prix']:,}F</td>
-<td><span style="background:{sc};color:#fff;padding:2px 7px;border-radius:4px;font-size:11px">{st}</span></td>
+<td><strong>{c['ref']}</strong></td>
+<td>{c['nom']}</td>
+<td>{c['telephone']}</td>
+<td>{c['nom_niveau']}</td>
+<td>{c['prix']:,} F</td>
+<td><span style="background:{sc};color:#fff;padding:2px 8px;border-radius:4px;font-size:11px">{st}</span></td>
 <td>
-<a href="/test/{c['ref']}" style="background:#1B3A6B;color:#fff;padding:3px 7px;border-radius:4px;font-size:11px;text-decoration:none;margin-right:3px">Livrer</a>
-<a href="/admin/renvoyer/{c['ref']}" style="background:#1A7A4A;color:#fff;padding:3px 7px;border-radius:4px;font-size:11px;text-decoration:none">Renvoyer</a>
+<a href="/livrer/{c['ref']}" style="background:#1B3A6B;color:#fff;padding:4px 9px;border-radius:4px;font-size:11px;text-decoration:none;margin-right:3px">📤 Livrer</a>
+<a href="/admin/renvoyer/{c['ref']}" style="background:#1A7A4A;color:#fff;padding:4px 9px;border-radius:4px;font-size:11px;text-decoration:none">🔄 Renvoyer</a>
 </td></tr>"""
     total=len(commandes)
     livres=sum(1 for c in commandes if c["statut"]=="livre")
     ca=sum(c["prix"] for c in commandes if c["statut"]=="livre")
-    return Response(f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+    return Response(f"""<!DOCTYPE html><html><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="refresh" content="15">
-<title>Dashboard MES EXERCICES</title>
-<style>*{{margin:0;padding:0;box-sizing:border-box}}body{{font-family:Arial,sans-serif;background:#f0f4f8}}
-header{{background:#1B3A6B;color:#fff;padding:14px 18px;display:flex;justify-content:space-between;align-items:center}}
-header h1{{font-size:15px}}.out{{color:#F5C518;text-decoration:none;font-size:12px}}
-.banner{{background:#E8F5E9;padding:9px 18px;font-size:12px;color:#1B5E20;text-align:center;font-weight:600;border-bottom:1px solid #A5D6A7}}
+<title>Dashboard - MES EXERCICES</title>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{font-family:Arial,sans-serif;background:#f0f4f8}}
+header{{background:#1B3A6B;color:#fff;padding:14px 18px;
+display:flex;justify-content:space-between;align-items:center}}
+header h1{{font-size:15px}}
+.out{{color:#F5C518;text-decoration:none;font-size:12px}}
+.banner{{background:#E8F5E9;padding:8px 18px;font-size:12px;
+color:#1B5E20;text-align:center;font-weight:600;border-bottom:1px solid #A5D6A7}}
 .stats{{display:flex;gap:10px;padding:14px;flex-wrap:wrap}}
-.stat{{background:#fff;border-radius:8px;padding:12px;flex:1;min-width:90px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.08)}}
-.stat .n{{font-size:22px;font-weight:800;color:#1B3A6B}}.stat .l{{font-size:10px;color:#888;margin-top:2px}}
+.stat{{background:#fff;border-radius:8px;padding:12px 16px;flex:1;
+min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.08)}}
+.stat .n{{font-size:24px;font-weight:800;color:#1B3A6B}}
+.stat .l{{font-size:10px;color:#888;margin-top:2px}}
 .cont{{padding:0 14px 14px}}
-.nb{{display:inline-block;background:#F5C518;color:#1B3A6B;padding:8px 16px;border-radius:6px;text-decoration:none;font-weight:700;margin-bottom:12px;font-size:13px}}
-table{{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08);font-size:12px}}
-th{{background:#1B3A6B;color:#fff;padding:9px;text-align:left}}td{{padding:9px;border-bottom:1px solid #f0f0f0}}
-.empty{{text-align:center;padding:36px;color:#999;background:#fff;border-radius:8px}}</style></head>
+.new-btn{{display:inline-block;background:#F5C518;color:#1B3A6B;
+padding:8px 16px;border-radius:6px;text-decoration:none;
+font-weight:700;margin-bottom:12px;font-size:13px}}
+table{{width:100%;border-collapse:collapse;background:#fff;
+border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08);
+font-size:12px}}
+th{{background:#1B3A6B;color:#fff;padding:10px;text-align:left}}
+td{{padding:10px;border-bottom:1px solid #f0f0f0}}
+tr:last-child td{{border-bottom:none}}
+.empty{{text-align:center;padding:36px;color:#999;
+background:#fff;border-radius:8px}}</style></head>
 <body>
-<header><h1>📚 MES EXERCICES — Dashboard</h1><a href="/admin/logout" class="out">Déconnexion</a></header>
-<div class="banner">⚡ Polling actif — Livraison auto toutes les 2 secondes</div>
+<header>
+  <h1>📚 MES EXERCICES — Dashboard</h1>
+  <a href="/admin/logout" class="out">Déconnexion</a>
+</header>
+<div class="banner">
+  ⚡ Livraison auto active — {total} commandes en mémoire
+</div>
 <div class="stats">
-<div class="stat"><div class="n">{total-livres}</div><div class="l">En attente</div></div>
-<div class="stat"><div class="n">{livres}</div><div class="l">Livrées</div></div>
-<div class="stat"><div class="n">{total}</div><div class="l">Total</div></div>
-<div class="stat"><div class="n">{ca:,}</div><div class="l">CA (F)</div></div>
+  <div class="stat"><div class="n">{total-livres}</div><div class="l">En attente</div></div>
+  <div class="stat"><div class="n">{livres}</div><div class="l">Livrées</div></div>
+  <div class="stat"><div class="n">{total}</div><div class="l">Total</div></div>
+  <div class="stat"><div class="n">{ca:,} F</div><div class="l">CA total</div></div>
 </div>
 <div class="cont">
-<a href="/admin/nouvelle" class="nb">+ Commande manuelle</a>
-{'<table><thead><tr><th>Ref</th><th>Nom</th><th>Tel</th><th>Niveau</th><th>Prix</th><th>Statut</th><th>Actions</th></tr></thead><tbody>'+rows+'</tbody></table>' if commandes else '<div class="empty">⚡ Livraison auto active — En attente de commandes</div>'}
+  <a href="/admin/nouvelle" class="new-btn">+ Commande manuelle</a>
+  {"<table><thead><tr><th>Réf</th><th>Nom</th><th>Tél</th><th>Niveau</th><th>Prix</th><th>Statut</th><th>Actions</th></tr></thead><tbody>"+rows+"</tbody></table>" if commandes else '<div class="empty">Aucune commande pour le moment</div>'}
 </div></body></html>""",mimetype="text/html")
+
+@app.route("/livrer/<ref>")
+@login_required
+def livrer(ref):
+    ok = trouver_et_livrer(ref)
+    return redirect(url_for("admin"))
 
 @app.route("/admin/renvoyer/<ref>")
 @login_required
 def renvoyer(ref):
-    for c in commandes:
-        if c["ref"]==ref:
-            livrer_commande(c)
-            break
+    trouver_et_livrer(ref)
     return redirect(url_for("admin"))
 
-@app.route("/admin/nouvelle",methods=["GET","POST"])
+@app.route("/admin/nouvelle", methods=["GET","POST"])
 @login_required
 def nouvelle():
     if request.method=="POST":
@@ -341,22 +578,30 @@ def nouvelle():
             "nom":request.form.get("nom"),"telephone":request.form.get("telephone"),
             "prix":PRIX.get(niveau,0),"statut":"en_attente"
         })
+        sauvegarder()
         return redirect(url_for("admin"))
-    opts="".join([f'<option value="{k}">{v} — {PRIX[k]:,}F</option>' for k,v in NOMS.items()])
+    opts="".join([f'<option value="{k}">{v} — {PRIX[k]:,} F</option>' for k,v in NOMS.items()])
     return Response(f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Nouvelle commande</title>
-<style>body{{font-family:Arial,sans-serif;background:#f0f4f8;display:flex;justify-content:center;padding:28px 14px}}
-.c{{background:#fff;border-radius:10px;padding:22px;max-width:380px;width:100%;box-shadow:0 2px 8px rgba(0,0,0,.1)}}
-h2{{color:#1B3A6B;margin-bottom:16px}}label{{display:block;margin-bottom:4px;font-weight:700;font-size:13px}}
-select,input{{width:100%;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:14px;margin-bottom:12px}}
-button{{width:100%;background:#1B3A6B;color:#fff;border:none;padding:12px;border-radius:6px;font-size:14px;cursor:pointer}}
-a{{display:block;text-align:center;margin-top:10px;color:#666;font-size:13px;text-decoration:none}}</style></head>
+<style>body{{font-family:Arial,sans-serif;background:#f0f4f8;display:flex;
+justify-content:center;padding:28px 14px}}
+.c{{background:#fff;border-radius:10px;padding:22px;max-width:380px;
+width:100%;box-shadow:0 2px 8px rgba(0,0,0,.1)}}
+h2{{color:#1B3A6B;margin-bottom:16px}}
+label{{display:block;margin-bottom:4px;font-weight:700;font-size:13px}}
+select,input{{width:100%;padding:10px;border:1px solid #ddd;border-radius:6px;
+font-size:14px;margin-bottom:12px}}
+button{{width:100%;background:#1B3A6B;color:#fff;border:none;padding:12px;
+border-radius:6px;font-size:14px;cursor:pointer}}
+a{{display:block;text-align:center;margin-top:10px;color:#666;
+font-size:13px;text-decoration:none}}</style></head>
 <body><div class="c"><h2>Nouvelle commande</h2>
 <form method="POST">
 <label>Niveau</label><select name="niveau">{opts}</select>
 <label>Nom client</label><input name="nom" placeholder="Fatou Diallo" required>
-<label>Telephone</label><input name="telephone" placeholder="221771234567" required>
-<button>Enregistrer</button></form>
-<a href="/admin">← Retour</a></div></body></html>""",mimetype="text/html")
+<label>Telephone WhatsApp</label>
+<input name="telephone" placeholder="221771234567" required>
+<button>Enregistrer</button>
+</form><a href="/admin">← Retour</a></div></body></html>""",mimetype="text/html")
 
 @app.route("/admin/logout")
 def logout():
@@ -415,7 +660,7 @@ nav{background:var(--bleu);padding:0 20px;display:flex;align-items:center;justif
 .rc{background:#EFF6FF;border-radius:7px;padding:9px;margin-bottom:10px;display:none;font-size:12px}
 .rc strong{color:var(--bleu);font-size:16px}
 label{display:block;margin-bottom:3px;font-weight:600;font-size:12px}
-input{width:100%;padding:9px;border:1.5px solid #E0E0E0;border-radius:7px;font-size:13px;margin-bottom:10px;transition:border-color .15s}
+input{width:100%;padding:9px;border:1.5px solid #E0E0E0;border-radius:7px;font-size:13px;margin-bottom:10px}
 input:focus{outline:none;border-color:var(--bleu)}
 .bcmd{width:100%;background:var(--jaune);color:var(--bleu);border:none;padding:13px;border-radius:9px;font-size:14px;font-weight:800;cursor:pointer}
 .ic{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);border-radius:12px;padding:20px;color:#fff}
@@ -450,7 +695,7 @@ footer{background:#1A1A18;color:rgba(255,255,255,.5);padding:26px 18px;text-alig
 </div>
 <div class="proof">
   <div class="proof-inner">
-    <span class="pi">⚡ Livraison auto WhatsApp</span>
+    <span class="pi">⚡ Livraison instantanée WhatsApp</span>
     <span class="pi">📄 100 pages par cahier</span>
     <span class="pi">✅ 500+ exercices</span>
     <span class="pi">💰 Dès 1 000 FCFA</span>
@@ -504,12 +749,12 @@ footer{background:#1A1A18;color:rgba(255,255,255,.5);padding:26px 18px;text-alig
       <div class="ic">
         <h3>⚡ Comment ça marche ?</h3>
         <div class="step"><div class="sn">1</div><div class="st"><strong>Choisissez et commandez</strong><span>Sélectionnez niveau, remplissez le formulaire</span></div></div>
-        <div class="step"><div class="sn">2</div><div class="st"><strong>Payez Wave ou Orange Money</strong><span>Lien direct Wave ou code *144#</span></div></div>
-        <div class="step"><div class="sn">3</div><div class="st"><strong>Envoyez la confirmation</strong><span>Bouton WhatsApp pré-rempli avec votre référence</span></div></div>
-        <div class="step"><div class="sn">4</div><div class="st"><strong>Recevez en 2 minutes !</strong><span>Cahier PDF livré automatiquement</span></div></div>
-        <div class="ab">⚡ 100% automatique — sans intervention humaine</div>
+        <div class="step"><div class="sn">2</div><div class="st"><strong>Payez le montant exact</strong><span>Wave avec montant pré-rempli ou Orange Money *144#</span></div></div>
+        <div class="step"><div class="sn">3</div><div class="st"><strong>Cliquez "J'ai payé"</strong><span>Un bouton vert vous envoie le cahier instantanément</span></div></div>
+        <div class="step"><div class="sn">4</div><div class="st"><strong>Recevez en 2 minutes !</strong><span>PDF livré automatiquement sur WhatsApp</span></div></div>
+        <div class="ab">⚡ 100% automatique — livraison instantanée</div>
         <div style="font-size:12px;color:rgba(255,255,255,.8);margin-top:10px">
-          💙 Wave · 🟠 Orange Money<br>
+          💙 Wave (montant auto) · 🟠 Orange Money<br>
           📞 <strong style="color:#fff">+221 77 134 34 99</strong>
         </div>
       </div>
@@ -533,7 +778,7 @@ function sc(n){document.getElementById('commander').scrollIntoView({behavior:'sm
 </script>
 </body></html>"""
 
-# Demarrer le polling au lancement de l'application
+# Demarrer le polling WhatsApp
 demarrer_polling()
 
 if __name__ == "__main__":
