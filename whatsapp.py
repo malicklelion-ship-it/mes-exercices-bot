@@ -23,20 +23,20 @@ NOMS_NIVEAUX = {
     "pack":       "Pack Complet (9 niveaux)",
 }
 
-# Liens de TELECHARGEMENT DIRECT PDF (format uc?export=download)
-def drive_link(file_id):
+# Liens PDF directs (telechargement automatique)
+def dl(file_id):
     return f"https://drive.google.com/uc?export=download&id={file_id}"
 
 DRIVE_LINKS = {
-    "maternelle": drive_link("1K0W1OhjWi9przzz4Q7sGkUbRtnQMLJOk"),
-    "ci":         drive_link("1URr_sYraPxX_EDX8MVYond4X4qA_NUd-"),
-    "cp":         drive_link("1_BgaDuurE3zRW4E9bgMfyu7KpPnGZsRB"),
-    "ce1":        drive_link("1_LIt16yOn9oRPy32CGxynbg71w2hWFgi"),
-    "ce2":        drive_link("1v0mYvk-iVU0lFBBAXhlW1S0TjYwiVo6f"),
-    "cm1":        drive_link("100MbZfQ23dkX-JRWYyWbz1_76g0UBkmw"),
-    "cm2":        drive_link("1zG8XeuaT2KX87SKxIw9B8TY31iBFfJSb"),
-    "cem1":       drive_link("1ERJBgxta-UMAZXYX9YLQ0mHiDRbd0m3W"),
-    "cem2":       drive_link("1QndP0yRfbpfQgvYkj9eP3qs9cZrgu5IM"),
+    "maternelle": dl("1kqocCbOlYSFfSJotNPSK3dp36EcCavuW"),
+    "ci":         dl("1b_GLMYrqK5GN60szlarfKOf5Lh9Erx3d"),
+    "cp":         dl("1Ie39rU54ahU9QVtPBChhBUmRgBVRrIL3"),
+    "ce1":        dl("1H0SHtPG2IDS96omT9iPNj3fOnhexPAFf"),
+    "ce2":        dl("1YkCeMJSLKQgP24Rk2bCtq-YNhNZHd4YT"),
+    "cm1":        dl("1Mt0dgDr_zq0KNg7eeRKujBWsC01mWCq6"),
+    "cm2":        dl("1rBHg-39IYHSyaPE8DrmZuAWeoI4eRnzg"),
+    "cem1":       dl("1QDU8lRaNR7qXTv8LhzRak4Oy-Vxs41KK"),
+    "cem2":       dl("1jdyGLh6NiqSH9HgBEcEiSoWuP-nimCme"),
 }
 
 PRIX = {
@@ -46,58 +46,49 @@ PRIX = {
 }
 
 def envoyer_message(telephone, texte):
-    """Envoie un message texte via UltraMsg"""
-    numero = telephone.strip().replace("+", "").replace(" ", "")
+    numero = telephone.strip().replace("+","").replace(" ","")
     if not numero.startswith("+"):
         numero = "+" + numero
     try:
         r = requests.post(
             f"{ULTRA_BASE}/messages/chat",
-            data={
-                "token": ULTRA_TOKEN,
-                "to": numero,
-                "body": texte,
-                "priority": 1
-            },
+            data={"token":ULTRA_TOKEN,"to":numero,"body":texte,"priority":1},
             timeout=15
         )
-        log.info(f"UltraMsg {telephone}: {r.status_code} - {r.text[:100]}")
+        log.info(f"UltraMsg {telephone}: {r.status_code} - {r.text[:80]}")
         return r.status_code == 200
     except Exception as e:
         log.error(f"Erreur UltraMsg: {e}")
         return False
 
 def envoyer_livraison(telephone, nom, niveau, ref):
-    """Envoie le lien de telechargement PDF direct"""
     nom_niveau = NOMS_NIVEAUX.get(niveau, niveau)
 
     if niveau == "pack":
-        # Pack = envoyer tous les liens
         liens = ""
         for niv in ["maternelle","ci","cp","ce1","ce2","cm1","cm2","cem1","cem2"]:
-            liens += f"\n{NOMS_NIVEAUX[niv]}: {DRIVE_LINKS[niv]}"
+            liens += f"\n• {NOMS_NIVEAUX[niv]}:\n{DRIVE_LINKS[niv]}"
         message = (
             f"Bonjour {nom} ! 🎓\n\n"
             f"Merci pour votre commande MES EXERCICES !\n\n"
-            f"Votre Pack Complet (9 niveaux) est pret !\n"
-            f"Telechargez vos cahiers PDF :{liens}\n\n"
-            f"Reference : {ref}\n\n"
-            f"Bon apprentissage ! 📚\n"
-            f"Support : +221 77 134 34 99"
+            f"✅ Votre Pack Complet (9 niveaux) est prêt !\n\n"
+            f"Téléchargez vos 9 cahiers PDF :{liens}\n\n"
+            f"📌 Référence : {ref}\n"
+            f"📚 Bon apprentissage !\n"
+            f"📞 Support : +221 77 134 34 99"
         )
     else:
         lien = DRIVE_LINKS.get(niveau, "")
         message = (
             f"Bonjour {nom} ! 🎓\n\n"
             f"Merci pour votre commande MES EXERCICES !\n\n"
-            f"Votre cahier *{nom_niveau}* est pret !\n\n"
-            f"Telechargez votre PDF ici :\n"
+            f"✅ Votre cahier *{nom_niveau}* est prêt !\n\n"
+            f"📥 Téléchargez votre PDF ici :\n"
             f"{lien}\n\n"
-            f"Reference : {ref}\n\n"
-            f"Bon apprentissage ! 📚\n"
-            f"Support : +221 77 134 34 99"
+            f"📌 Référence : {ref}\n"
+            f"📚 Bon apprentissage !\n"
+            f"📞 Support : +221 77 134 34 99"
         )
-
     return envoyer_message(telephone, message)
 
 def envoyer_confirmation_attente(telephone, nom, niveau, ref):
@@ -105,11 +96,11 @@ def envoyer_confirmation_attente(telephone, nom, niveau, ref):
     prix = PRIX.get(niveau, 0)
     message = (
         f"Bonjour {nom} !\n\n"
-        f"Votre commande MES EXERCICES a ete recue.\n"
-        f"Niveau : {nom_niveau}\n"
-        f"Montant : {prix:,} FCFA\n"
-        f"Reference : {ref}\n\n"
-        f"Votre cahier PDF sera envoye apres confirmation du paiement.\n"
-        f"Contact : +221 77 134 34 99"
+        f"✅ Votre commande MES EXERCICES a été reçue.\n\n"
+        f"📚 Niveau : {nom_niveau}\n"
+        f"💰 Montant : {prix:,} FCFA\n"
+        f"📌 Référence : {ref}\n\n"
+        f"Votre cahier PDF sera envoyé après confirmation du paiement.\n"
+        f"📞 Contact : +221 77 134 34 99"
     )
     return envoyer_message(telephone, message)
