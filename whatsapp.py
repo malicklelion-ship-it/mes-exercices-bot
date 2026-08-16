@@ -3,10 +3,12 @@ import logging
 
 log = logging.getLogger(__name__)
 
-# --- Green API - identifiants ---
-GREEN_INSTANCE = "710722708786"
-GREEN_TOKEN    = "219438e83e1a4e929a867f34e27565a560c00bb08f6a4a6089"   # <-- remplacez par votre vrai token
-# --------------------------------
+# ============================================================
+# ULTRAMSG — WhatsApp API (100 messages/jour gratuits)
+# ============================================================
+ULTRA_INSTANCE = "instance188601"
+ULTRA_TOKEN    = "bya0778bd0fr1j4g"
+ULTRA_BASE     = f"https://api.ultramsg.com/{ULTRA_INSTANCE}"
 
 NOMS_NIVEAUX = {
     "maternelle": "Maternelle",
@@ -22,16 +24,16 @@ NOMS_NIVEAUX = {
 }
 
 DRIVE_LINKS = {
-    "maternelle": "https://drive.google.com/file/d/1kqocCbOlYSFfSJotNPSK3dp36EcCavuW/view?usp=drive_link",
-    "ci":         "https://drive.google.com/file/d/1b_GLMYrqK5GN60szlarfKOf5Lh9Erx3d/view?usp=drive_link",
-    "cp":         "https://drive.google.com/file/d/1Ie39rU54ahU9QVtPBChhBUmRgBVRrIL3/view?usp=drive_link",
-    "ce1":        "https://drive.google.com/file/d/1H0SHtPG2IDS96omT9iPNj3fOnhexPAFf/view?usp=drive_link",
-    "ce2":        "https://drive.google.com/file/d/1YkCeMJSLKQgP24Rk2bCtq-YNhNZHd4YT/view?usp=drive_link",
-    "cm1":        "https://drive.google.com/file/d/1Mt0dgDr_zq0KNg7eeRKujBWsC01mWCq6/view?usp=drive_link",
-    "cm2":        "https://drive.google.com/file/d/1rBHg-39IYHSyaPE8DrmZuAWeoI4eRnzg/view?usp=drive_link",
-    "cem1":       "https://drive.google.com/file/d/1QDU8lRaNR7qXTv8LhzRak4Oy-Vxs41KK/view?usp=drive_link",
-    "cem2":       "https://drive.google.com/file/d/1jdyGLh6NiqSH9HgBEcEiSoWuP-nimCme/view?usp=drive_link",
-    "pack":       "Voir les 9 liens ci-dessus",
+    "maternelle": "https://drive.google.com/file/d/1K0W1OhjWi9przzz4Q7sGkUbRtnQMLJOk/view?usp=sharing",
+    "ci":         "https://drive.google.com/file/d/1URr_sYraPxX_EDX8MVYond4X4qA_NUd-/view?usp=drive_link",
+    "cp":         "https://drive.google.com/file/d/1_BgaDuurE3zRW4E9bgMfyu7KpPnGZsRB/view?usp=sharing",
+    "ce1":        "https://drive.google.com/file/d/1_LIt16yOn9oRPy32CGxynbg71w2hWFgi/view?usp=sharing",
+    "ce2":        "https://drive.google.com/file/d/1v0mYvk-iVU0lFBBAXhlW1S0TjYwiVo6f/view?usp=drive_link",
+    "cm1":        "https://drive.google.com/file/d/100MbZfQ23dkX-JRWYyWbz1_76g0UBkmw/view?usp=drive_link",
+    "cm2":        "https://drive.google.com/file/d/1zG8XeuaT2KX87SKxIw9B8TY31iBFfJSb/view?usp=drive_link",
+    "cem1":       "https://drive.google.com/file/d/1ERJBgxta-UMAZXYX9YLQ0mHiDRbd0m3W/view?usp=drive_link",
+    "cem2":       "https://drive.google.com/file/d/1QndP0yRfbpfQgvYkj9eP3qs9cZrgu5IM/view?usp=sharing",
+    "pack":       "",
 }
 
 PRIX = {
@@ -40,33 +42,38 @@ PRIX = {
     "cem1": 1200, "cem2": 1500, "pack": 6000,
 }
 
-BASE_URL = f"https://7107.api.greenapi.com/waInstance{GREEN_INSTANCE}"
-
 def envoyer_message(telephone, texte):
-    """Envoie un message texte simple via Green API."""
+    """Envoie un message texte via UltraMsg"""
     numero = telephone.strip().replace("+", "").replace(" ", "")
-    if not numero.endswith("@c.us"):
-        numero = numero + "@c.us"
-    url = f"{BASE_URL}/sendMessage/{GREEN_TOKEN}"
-    payload = {"chatId": numero, "message": texte}
+    if not numero.startswith("+"):
+        numero = "+" + numero
+
     try:
-        r = requests.post(url, json=payload, timeout=15)
-        log.info(f"Green API sendMessage: {r.status_code} - {r.text[:100]}")
+        r = requests.post(
+            f"{ULTRA_BASE}/messages/chat",
+            data={
+                "token": ULTRA_TOKEN,
+                "to": numero,
+                "body": texte,
+                "priority": 1
+            },
+            timeout=15
+        )
+        log.info(f"UltraMsg send {telephone}: {r.status_code} - {r.text[:100]}")
         return r.status_code == 200
     except Exception as e:
-        log.error(f"Erreur envoi message: {e}")
+        log.error(f"Erreur UltraMsg: {e}")
         return False
 
 def envoyer_livraison(telephone, nom, niveau, ref):
-    """Envoie le message de livraison avec le lien du cahier."""
+    """Envoie le message de livraison avec le lien du cahier"""
     nom_niveau = NOMS_NIVEAUX.get(niveau, niveau)
 
     if niveau == "pack":
-        # Pour le pack, envoyer tous les liens
         liens = ""
         for niv, lien in DRIVE_LINKS.items():
-            if niv != "pack":
-                liens += f"\n- {NOMS_NIVEAUX[niv]} : {lien}"
+            if niv != "pack" and lien:
+                liens += f"\n- {NOMS_NIVEAUX[niv]}: {lien}"
         message = (
             f"Bonjour {nom} ! Merci pour votre commande MES EXERCICES.\n\n"
             f"Votre Pack Complet (9 niveaux) est pret !\n\n"
@@ -78,15 +85,16 @@ def envoyer_livraison(telephone, nom, niveau, ref):
         lien = DRIVE_LINKS.get(niveau, "")
         message = (
             f"Bonjour {nom} ! Merci pour votre commande MES EXERCICES.\n\n"
-            f"Votre cahier {nom_niveau} est pret !\n\n"
+            f"Votre cahier *{nom_niveau}* est pret !\n\n"
             f"Telechargez-le ici :\n{lien}\n\n"
             f"Reference : {ref}\n"
             f"Bon apprentissage ! Pour toute question : +221 77 134 34 99"
         )
+
     return envoyer_message(telephone, message)
 
 def envoyer_confirmation_attente(telephone, nom, niveau, ref):
-    """Envoie une confirmation de reception de commande."""
+    """Envoie une confirmation de reception de commande"""
     nom_niveau = NOMS_NIVEAUX.get(niveau, niveau)
     prix = PRIX.get(niveau, 0)
     message = (
@@ -95,19 +103,7 @@ def envoyer_confirmation_attente(telephone, nom, niveau, ref):
         f"Niveau : {nom_niveau}\n"
         f"Montant : {prix:,} FCFA\n"
         f"Reference : {ref}\n\n"
-        f"Votre cahier vous sera envoye sous 5 minutes apres confirmation du paiement.\n"
+        f"Votre cahier sera envoye apres confirmation du paiement.\n"
         f"Contact : +221 77 134 34 99"
-    )
-    return envoyer_message(telephone, message)
-
-def envoyer_relance(telephone, nom, niveau, ref):
-    """Envoie un message de relance si paiement non confirme."""
-    nom_niveau = NOMS_NIVEAUX.get(niveau, niveau)
-    prix = PRIX.get(niveau, 0)
-    message = (
-        f"Bonjour {nom} !\n\n"
-        f"Votre commande {nom_niveau} ({prix:,} FCFA) - ref {ref} - est en attente de paiement.\n\n"
-        f"Envoyez le paiement sur +221 77 134 34 99 (Wave ou Orange Money)\n"
-        f"puis repondez a ce message pour confirmer."
     )
     return envoyer_message(telephone, message)
