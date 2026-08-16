@@ -23,20 +23,20 @@ NOMS_NIVEAUX = {
     "pack":       "Pack Complet (9 niveaux)",
 }
 
-# Liens PDF directs (telechargement automatique)
-def dl(file_id):
-    return f"https://drive.google.com/uc?export=download&id={file_id}"
+# Liens VIEW — ouvrent le PDF directement dans Google Drive
+def view(file_id):
+    return f"https://drive.google.com/file/d/{file_id}/view"
 
 DRIVE_LINKS = {
-    "maternelle": dl("1kqocCbOlYSFfSJotNPSK3dp36EcCavuW"),
-    "ci":         dl("1b_GLMYrqK5GN60szlarfKOf5Lh9Erx3d"),
-    "cp":         dl("1Ie39rU54ahU9QVtPBChhBUmRgBVRrIL3"),
-    "ce1":        dl("1H0SHtPG2IDS96omT9iPNj3fOnhexPAFf"),
-    "ce2":        dl("1YkCeMJSLKQgP24Rk2bCtq-YNhNZHd4YT"),
-    "cm1":        dl("1Mt0dgDr_zq0KNg7eeRKujBWsC01mWCq6"),
-    "cm2":        dl("1rBHg-39IYHSyaPE8DrmZuAWeoI4eRnzg"),
-    "cem1":       dl("1QDU8lRaNR7qXTv8LhzRak4Oy-Vxs41KK"),
-    "cem2":       dl("1jdyGLh6NiqSH9HgBEcEiSoWuP-nimCme"),
+    "maternelle": view("1kqocCbOlYSFfSJotNPSK3dp36EcCavuW"),
+    "ci":         view("1b_GLMYrqK5GN60szlarfKOf5Lh9Erx3d"),
+    "cp":         view("1Ie39rU54ahU9QVtPBChhBUmRgBVRrIL3"),
+    "ce1":        view("1H0SHtPG2IDS96omT9iPNj3fOnhexPAFf"),
+    "ce2":        view("1YkCeMJSLKQgP24Rk2bCtq-YNhNZHd4YT"),
+    "cm1":        view("1Mt0dgDr_zq0KNg7eeRKujBWsC01mWCq6"),
+    "cm2":        view("1rBHg-39IYHSyaPE8DrmZuAWeoI4eRnzg"),
+    "cem1":       view("1QDU8lRaNR7qXTv8LhzRak4Oy-Vxs41KK"),
+    "cem2":       view("1jdyGLh6NiqSH9HgBEcEiSoWuP-nimCme"),
 }
 
 PRIX = {
@@ -72,7 +72,9 @@ def envoyer_livraison(telephone, nom, niveau, ref):
             f"Bonjour {nom} ! 🎓\n\n"
             f"Merci pour votre commande MES EXERCICES !\n\n"
             f"✅ Votre Pack Complet (9 niveaux) est prêt !\n\n"
-            f"Téléchargez vos 9 cahiers PDF :{liens}\n\n"
+            f"📖 Ouvrez vos 9 cahiers PDF :{liens}\n\n"
+            f"💡 Appuyez sur le lien pour ouvrir le PDF\n"
+            f"    puis appuyez ⬇️ pour le sauvegarder\n\n"
             f"📌 Référence : {ref}\n"
             f"📚 Bon apprentissage !\n"
             f"📞 Support : +221 77 134 34 99"
@@ -83,8 +85,10 @@ def envoyer_livraison(telephone, nom, niveau, ref):
             f"Bonjour {nom} ! 🎓\n\n"
             f"Merci pour votre commande MES EXERCICES !\n\n"
             f"✅ Votre cahier *{nom_niveau}* est prêt !\n\n"
-            f"📥 Téléchargez votre PDF ici :\n"
+            f"📖 Ouvrez votre PDF ici :\n"
             f"{lien}\n\n"
+            f"💡 Appuyez sur le lien pour ouvrir le PDF\n"
+            f"    puis appuyez ⬇️ pour le sauvegarder\n\n"
             f"📌 Référence : {ref}\n"
             f"📚 Bon apprentissage !\n"
             f"📞 Support : +221 77 134 34 99"
